@@ -1,3 +1,6 @@
+# Unrelated Note Files
+tmp\*.txt
+
 # Logs
 logs
 *.log
@@ -22,3 +25,38 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+*.zip
+*.tar.gz
+*.rar
+*.7z
+*.gz
+*.tgz
+
+# Operating System files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Build outputs
+build/
+coverage/
+temp/
+tmp/
+
+# Environment variables file
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Other files to ignore
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Ignore specific directories if needed
+/public/assets/uploads/
