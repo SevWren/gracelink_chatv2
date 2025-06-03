@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gemini Chatbot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    /* Custom scrollbar for a cleaner look in dark theme */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #1e293b; /* slate-800 */
+      border-radius: 10px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155; /* slate-700 */
+      border-radius: 10px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569; /* slate-600 */
+    }
+    /* Ensure root takes full height for flex layout */
+    html, body, #root {
+      height: 100%;
+    }
+  </style>
+  <style>
+    /* Custom Tailwind class overrides */
+    .duration-300 {
+      transition-duration: 1000ms !important;
+    }
+    .pb-1 {
+      padding-bottom: 0rem !important;
+    }
+    .py-3 {
+      padding-top: 0.0rem !important;
+      padding-bottom: 0.0rem !important;
+    }
+    .px-2 {
+      padding-left: 0rem !important;
+      padding-right: 0rem !important;
+    }
+  </style>
+
+<script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.1.0/",
+    "react": "https://esm.sh/react@^19.1.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.3.0",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^4.5.0",
+    "vite": "https://esm.sh/vite@^6.3.5"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="bg-slate-900 text-slate-200">
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
