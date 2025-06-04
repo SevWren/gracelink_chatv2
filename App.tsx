@@ -1,294 +1,269 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Message, Sender } from './types';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
+import { Sender } from './types';
 import ChatMessageItem from './components/ChatMessageItem';
 import ChatInput from './components/ChatInput';
-import { getGeminiResponse, initializeGeminiClient } from './services/geminiService';
+import ConfirmationModal from './components/ConfirmationModal';
+import RightSidebar from './components/RightSidebar';
+
+import { useApiKeyManagement } from './hooks/useApiKeyManagement';
+import { useChatSettings } from './hooks/useChatSettings';
+import { useMessageManager } from './hooks/useMessageManager';
+import { useChatProcessor } from './hooks/useChatProcessor';
+import { useChatFiles } from './hooks/useChatFiles';
+import { useModalControls } from './hooks/useModalControls';
+import { useAppInitializer } from './hooks/useAppInitializer';
+
+import { 
+  initializeGeminiClient, 
+  resetChatSession,
+  deinitializeGeminiClient,
+  getCurrentChatHistory,
+} from './services/geminiService';
 
 const APP_NAME = "[App.tsx]";
+const initialWelcomeMessage = "Hello! To get started, please enter LLM Gemini API Key in `Update API Key:` in the right column.";
+
+const MIN_SIDEBAR_WIDTH = 200; // px
+const MAX_SIDEBAR_WIDTH = 600; // px
+const DEFAULT_SIDEBAR_WIDTH = 288; // px (tailwind w-72)
+const SIDEBAR_WIDTH_STORAGE_KEY = 'geminiChatSidebarWidth';
 
 const App: React.FC = () => {
-  const initialAiMessageText = "Welcome! To get started, please enter your Gemini API Key in the `Update API Key:` field in the right column.";
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isRightSidebarVisible, setIsRightSidebarVisible] = React.useState<boolean>(true);
 
-  const [_apiKey, setApiKey] = useState<string | null>(null);
-  const [isApiKeySet, setIsApiKeySet] = useState<boolean>(false);
-  const [isRightSidebarVisible, setIsRightSidebarVisible] = useState<boolean>(true); 
+  const [sidebarWidth, setSidebarWidth] = useState<number>(DEFAULT_SIDEBAR_WIDTH);
+  const [isResizingSidebar, setIsResizingSidebar] = useState<boolean>(false);
+  const initialMouseXRef = useRef<number>(0);
+  const initialSidebarWidthRef = useRef<number>(0);
 
-  const [aiName, setAiName] = useState<string>('AI');
-  const [userName, setUserName] = useState<string>('User');
-  const [sidebarAiNameInput, setSidebarAiNameInput] = useState<string>('AI');
-  const [sidebarUserNameInput, setSidebarUserNameInput] = useState<string>('User');
+  const apiKeyManager = useApiKeyManagement();
+  const chatSettingsManager = useChatSettings();
+  
+  const messageManager = useMessageManager();
+  const chatProcessor = useChatProcessor(messageManager);
+  const chatFilesHandler = useChatFiles(messageManager, chatSettingsManager);
+  const modalControls = useModalControls();
+
+  useAppInitializer(apiKeyManager, chatSettingsManager, messageManager);
+
+  // Load sidebar width from localStorage on mount
+  useEffect(() => {
+    const storedWidth = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+    if (storedWidth) {
+      const numWidth = parseInt(storedWidth, 10);
+      if (!isNaN(numWidth) && numWidth >= MIN_SIDEBAR_WIDTH && numWidth <= MAX_SIDEBAR_WIDTH) {
+        setSidebarWidth(numWidth);
+      }
+    }
+  }, []);
+
+  // Save sidebar width to localStorage when it changes (and not resizing/hidden)
+  useEffect(() => {
+    if (!isResizingSidebar && isRightSidebarVisible && sidebarWidth > 0) {
+      localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    }
+  }, [sidebarWidth, isResizingSidebar, isRightSidebarVisible]);
 
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  useEffect(scrollToBottom, [messages]);
+  useEffect(scrollToBottom, [messageManager.messages]);
 
-  useEffect(() => {
-    console.log(`${APP_NAME} Initial effect running for API key, AI name, and User name check.`);
-    const storedApiKey = localStorage.getItem('geminiApiKey');
-    const storedAiName = localStorage.getItem('chatAiName');
-    const storedUserName = localStorage.getItem('chatUserName');
+  const addAppFeedbackMessage = useCallback((text: string, sender: Sender = Sender.AI) => {
+    messageManager.addMessage(text, sender);
+  }, [messageManager]);
 
-    if (storedAiName) {
-      console.log(`${APP_NAME} Found stored AI Name: "${storedAiName}".`);
-      setAiName(storedAiName);
-      setSidebarAiNameInput(storedAiName);
-    } else {
-      setSidebarAiNameInput(aiName); // Initialize with default if nothing stored
+
+  const handleApiKeyUpdate = useCallback((newKey: string) => {
+    console.log(`${APP_NAME} handleApiKeyUpdate called.`);
+    if (!newKey || newKey.trim() === '') {
+      addAppFeedbackMessage("API Key cannot be empty. Please enter a valid API Key.");
+      return;
     }
-
-    if (storedUserName) {
-      console.log(`${APP_NAME} Found stored User Name: "${storedUserName}".`);
-      setUserName(storedUserName);
-      setSidebarUserNameInput(storedUserName);
+    localStorage.removeItem('geminiChatHistory'); 
+    
+    const initialized = initializeGeminiClient(newKey, [], chatSettingsManager.systemInstruction);
+    if (initialized) {
+      apiKeyManager.setStoredApiKey(newKey);
+      messageManager.setAllMessages([]); 
+      addAppFeedbackMessage("API Key set successfully! A new chat session has started. How can I help you today?");
     } else {
-      setSidebarUserNameInput(userName); // Initialize with default if nothing stored
+      apiKeyManager.clearStoredApiKey(); 
+      deinitializeGeminiClient();
+      addAppFeedbackMessage("Failed to initialize with the provided API Key. Please check the key and try again.");
     }
+  }, [apiKeyManager, chatSettingsManager.systemInstruction, messageManager, addAppFeedbackMessage]);
 
-    if (storedApiKey) {
-      console.log(`${APP_NAME} Found stored API Key (length: ${storedApiKey.length}). Attempting to initialize client.`);
-      const initialized = initializeGeminiClient(storedApiKey);
-      if (initialized) {
-        setApiKey(storedApiKey);
-        setIsApiKeySet(true);
-        console.log(`${APP_NAME} Gemini client initialized successfully with stored key.`);
-        const welcomeBackMsg = {
-            id: 'initial-ai-welcome-back',
-            text: "Welcome back! Your API Key is loaded. How can I help you?",
-            sender: Sender.AI,
-            timestamp: new Date(),
-          };
-        setMessages([welcomeBackMsg]);
-        console.log(`${APP_NAME} Added welcome back message:`, welcomeBackMsg);
-      } else {
-        console.warn(`${APP_NAME} Failed to initialize Gemini client with stored key. Clearing stored key.`);
-        localStorage.removeItem('geminiApiKey');
-        const keyErrorMsg = {
-            id: 'initial-ai-prompt-key-error-load',
-            text: "There was an issue with your saved API Key. " + initialAiMessageText,
-            sender: Sender.AI,
-            timestamp: new Date(),
-          };
-        setMessages([keyErrorMsg]);
-        console.log(`${APP_NAME} Added key error message:`, keyErrorMsg);
+  const handleClearApiKey = useCallback(() => {
+    console.log(`${APP_NAME} handleClearApiKey called.`);
+    localStorage.removeItem('geminiChatHistory');
+    apiKeyManager.clearStoredApiKey();
+    deinitializeGeminiClient();
+    messageManager.setAllMessages([]); 
+    addAppFeedbackMessage("API Key has been cleared. " + initialWelcomeMessage);
+  }, [apiKeyManager, messageManager, addAppFeedbackMessage]);
+
+  const handleUpdateCustomNames = useCallback((newAiName: string, newUserName: string) => {
+    chatSettingsManager.setAiNameState(newAiName);
+    chatSettingsManager.setUserNameState(newUserName);
+    addAppFeedbackMessage(`Display names updated! AI is "${newAiName}", you are "${newUserName}".`);
+  }, [chatSettingsManager, addAppFeedbackMessage]);
+
+  const handleUpdateSystemInstruction = useCallback(async (newInstruction: string) => {
+    const effectiveInstruction = newInstruction.trim() === "" ? chatSettingsManager.DEFAULT_SYSTEM_INSTRUCTION : newInstruction.trim();
+    chatSettingsManager.setSystemInstructionState(effectiveInstruction);
+
+    if (apiKeyManager.isApiKeySet) {
+      try {
+        const currentHistory = await getCurrentChatHistory();
+        resetChatSession(currentHistory, effectiveInstruction);
+        const feedbackMsgText = effectiveInstruction === chatSettingsManager.DEFAULT_SYSTEM_INSTRUCTION
+          ? "System instruction reset to default."
+          : "System instruction updated.";
+        addAppFeedbackMessage(feedbackMsgText + " The new instruction will apply to the ongoing conversation.");
+      } catch (error) {
+        console.error(`${APP_NAME} Error updating system instruction:`, error);
+        addAppFeedbackMessage("An error occurred while updating system instruction.");
       }
     } else {
-      console.log(`${APP_NAME} No stored API Key found. Prompting user for key.`);
-      const promptKeyMsg = {
-          id: 'initial-ai-prompt-key',
-          text: initialAiMessageText,
-          sender: Sender.AI,
-          timestamp: new Date(),
-        };
-      setMessages([promptKeyMsg]);
-      console.log(`${APP_NAME} Added initial prompt for API key message:`, promptKeyMsg);
+      addAppFeedbackMessage("System instruction preference saved. It will be applied when an API key is set.");
     }
-  }, []);
+  }, [apiKeyManager.isApiKeySet, chatSettingsManager, addAppFeedbackMessage]);
 
-  useEffect(() => {
-    localStorage.setItem('chatAiName', aiName);
-    console.log(`${APP_NAME} AI Name updated in localStorage: "${aiName}"`);
-  }, [aiName]);
-
-  useEffect(() => {
-    localStorage.setItem('chatUserName', userName);
-    console.log(`${APP_NAME} User Name updated in localStorage: "${userName}"`);
-  }, [userName]);
-
-
-  useEffect(() => {
-    console.log(`${APP_NAME} isLoading state changed to: ${isLoading}`);
-  }, [isLoading]);
-
-  useEffect(() => {
-    if (error) {
-      console.error(`${APP_NAME} Error state updated: ${error}`);
+  const handleResetSystemInstruction = useCallback(async () => {
+    const instructionToApply = chatSettingsManager.resetSystemInstructionState();
+    if (apiKeyManager.isApiKeySet) {
+      try {
+        const currentHistory = await getCurrentChatHistory();
+        resetChatSession(currentHistory, instructionToApply);
+        addAppFeedbackMessage("System instruction has been reset to default.");
+      } catch (error) {
+        console.error(`${APP_NAME} Error resetting system instruction:`, error);
+        addAppFeedbackMessage("An error occurred while resetting system instruction.");
+      }
     } else {
-      console.log(`${APP_NAME} Error state cleared.`);
+      addAppFeedbackMessage("System instruction preference reset to default. It will be applied when an API key is set.");
     }
-  }, [error]);
-
-
-  const handleClearChat = () => {
-    console.log(`${APP_NAME} handleClearChat called.`);
-    setError(null);
-    let clearMessageText = "Chat cleared.";
-    if (isApiKeySet) {
-      clearMessageText += " How can I help you now?";
-    } else {
-      // If API key is not set, the initial message already guides to set the key.
-      clearMessageText = initialAiMessageText; 
-    }
-    const clearedMsg = {
-        id: `ai-cleared-${Date.now()}`,
-        text: clearMessageText,
-        sender: Sender.AI,
-        timestamp: new Date(),
-      };
-    setMessages([clearedMsg]);
-    console.log(`${APP_NAME} Chat cleared. Added message:`, clearedMsg);
-  };
-
-  const handleSendMessage = async (text: string) => {
-    console.log(`${APP_NAME} handleSendMessage called with text: "${text}"`);
-    setError(null); // Clear previous errors
-
-    if (!isApiKeySet) {
-        console.log(`${APP_NAME} API Key not set. User tried to send message: "${text}". Prompting to set key.`);
-        const promptToSetKeyMsg: Message = {
-            id: `ai-prompt-set-key-${Date.now()}`,
-            text: `Please set your API Key in the 'Chat Details' sidebar on the right before sending messages.`,
-            sender: Sender.AI,
-            timestamp: new Date(),
-        };
-        setMessages(prevMessages => [...prevMessages, promptToSetKeyMsg]);
-        setIsLoading(false);
-        return; 
-    }
-    
-    // If API key is set, proceed with sending message
-    const userMessage: Message = {
-      id: `user-${Date.now()}`,
-      text,
-      sender: Sender.User,
-      timestamp: new Date(),
-    };
-    console.log(`${APP_NAME} Adding user message:`, userMessage);
-    setMessages(prevMessages => [...prevMessages, userMessage]);
-    setIsLoading(true);
-    
-    console.log(`${APP_NAME} API Key is set. Sending prompt to Gemini.`);
-    try {
-      const aiResponseText = await getGeminiResponse(text);
-      console.log(`${APP_NAME} Received AI response text: "${aiResponseText}"`);
-      const newAiMessage: Message = {
-        id: `ai-response-${Date.now()}`,
-        text: aiResponseText,
-        sender: Sender.AI,
-        timestamp: new Date(),
-      };
-      console.log(`${APP_NAME} Adding AI response message:`, newAiMessage);
-      setMessages(prevMessages => [...prevMessages, newAiMessage]);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
-      console.error(`${APP_NAME} Error getting response from AI: ${errorMessage}`, err);
-      setError(`Failed to get response from AI: ${errorMessage}`);
-      const errorAiMessage: Message = {
-        id: `error-ai-response-${Date.now()}`,
-        text: `Sorry, I encountered an error: ${errorMessage}`,
-        sender: Sender.AI,
-        timestamp: new Date(),
-      };
-      console.log(`${APP_NAME} Adding AI error message:`, errorAiMessage);
-      setMessages(prevMessages => [...prevMessages, errorAiMessage]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  }, [apiKeyManager.isApiKeySet, chatSettingsManager, addAppFeedbackMessage]);
   
-  const handleApiKeyUpdate = (newKeyInput: string) => {
-    const newKey = newKeyInput.trim();
-    console.log(`${APP_NAME} handleApiKeyUpdate called with new key (length: ${newKey.length}).`);
-    if (!newKey) {
-        console.warn(`${APP_NAME} API Key update attempt with empty key ignored.`);
-         const emptyKeyMsg = {
-            id: `ai-key-update-empty-${Date.now()}`,
-            text: "API Key cannot be empty. Please enter a valid API Key.",
-            sender: Sender.AI,
-            timestamp: new Date(),
-          };
-        setMessages(prev => [...prev, emptyKeyMsg]);
+  const proceedWithClearChat = useCallback((exported: boolean) => {
+    resetChatSession([], chatSettingsManager.systemInstruction);
+    let feedback = `Chat history cleared${exported ? ' after export' : ''}.`;
+    if (apiKeyManager.isApiKeySet) {
+        feedback += " I'm ready to continue.";
+    } else {
+        feedback = initialWelcomeMessage; 
+    }
+    messageManager.clearAllMessagesAndState(feedback); 
+  }, [chatSettingsManager.systemInstruction, apiKeyManager.isApiKeySet, messageManager]);
+
+
+  const handleClearChatRequest = useCallback(() => {
+    console.log(`${APP_NAME} handleClearChatRequest called.`);
+    if (messageManager.messages.length === 0) {
+      addAppFeedbackMessage("Already empty.");
+      return;
+    }
+    modalControls.openClearConfirmModal();
+  }, [messageManager.messages, addAppFeedbackMessage, modalControls]);
+
+  const onConfirmClear = useCallback(() => {
+    modalControls.closeClearConfirmModal();
+    modalControls.openExportConfirmModal();
+  }, [modalControls]);
+
+  const onCancelClear = useCallback(() => {
+    modalControls.closeClearConfirmModal();
+  }, [modalControls]);
+
+  const onConfirmExportAndClear = useCallback(() => {
+    modalControls.closeExportConfirmModal();
+    chatFilesHandler.exportChatToFile();
+    proceedWithClearChat(true);
+  }, [modalControls, chatFilesHandler, proceedWithClearChat]);
+
+  const onSkipExportAndClear = useCallback(() => {
+    modalControls.closeExportConfirmModal();
+    proceedWithClearChat(false);
+  }, [modalControls, proceedWithClearChat]);
+
+  const handleLoadHistoryClick = useCallback(() => {
+    if (!apiKeyManager.isApiKeySet) {
+        addAppFeedbackMessage("Please set API Key before loading history.");
         return;
     }
-
-    const initialized = initializeGeminiClient(newKey);
-    let feedbackMessage: string;
-    if (initialized) {
-      setApiKey(newKey);
-      setIsApiKeySet(true);
-      localStorage.setItem('geminiApiKey', newKey);
-      feedbackMessage = "API Key set successfully! How can I help you today?";
-      console.log(`${APP_NAME} API Key updated and saved.`);
-    } else {
-      feedbackMessage = "Failed to initialize with the provided API Key. Please check the key and try again. Ensure it's a valid Gemini API Key.";
-      // Keep previous API key state if initialization fails, don't clear it.
-      // If _apiKey was null and this fails, it remains null.
-      // If _apiKey was valid and this fails, user might want to retry or clear.
-      console.warn(`${APP_NAME} Failed to update/initialize API Key with new key.`);
-    }
-    const updateFeedbackMsg = {
-        id: `ai-key-update-feedback-${Date.now()}`,
-        text: feedbackMessage,
-        sender: Sender.AI,
-        timestamp: new Date(),
-      };
-     setMessages(prev => [...prev, updateFeedbackMsg]);
-     console.log(`${APP_NAME} Added API key update feedback message:`, updateFeedbackMsg);
-  };
+    fileInputRef.current?.click();
+  }, [apiKeyManager.isApiKeySet, addAppFeedbackMessage]);
   
-  const handleClearApiKey = () => {
-    console.log(`${APP_NAME} handleClearApiKey called.`);
-    localStorage.removeItem('geminiApiKey');
-    setApiKey(null);
-    setIsApiKeySet(false);
-    initializeGeminiClient(''); // Effectively de-initializes
-    console.log(`${APP_NAME} API Key cleared from localStorage and state. Gemini client de-initialized.`);
-    
-    const clearedKeyMsg = {
-      id: `ai-key-cleared-feedback-${Date.now()}`,
-      text: "API Key has been cleared. " + initialAiMessageText,
-      sender: Sender.AI,
-      timestamp: new Date(),
+  const onFileSelected = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      chatFilesHandler.handleFileSelected(
+        event,
+        chatSettingsManager.userName,
+        chatSettingsManager.aiName,
+        chatSettingsManager.systemInstruction
+      );
+    },
+    [chatFilesHandler, chatSettingsManager.userName, chatSettingsManager.aiName, chatSettingsManager.systemInstruction]
+  );
+
+  const handleMouseDownOnResize = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsResizingSidebar(true);
+    initialMouseXRef.current = e.clientX;
+    initialSidebarWidthRef.current = sidebarWidth;
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingSidebar) return;
+      const deltaX = e.clientX - initialMouseXRef.current;
+      let newWidth = initialSidebarWidthRef.current - deltaX;
+
+      if (newWidth < MIN_SIDEBAR_WIDTH) newWidth = MIN_SIDEBAR_WIDTH;
+      if (newWidth > MAX_SIDEBAR_WIDTH) newWidth = MAX_SIDEBAR_WIDTH;
+      
+      setSidebarWidth(newWidth);
     };
-    // Clear existing messages and add the prompt.
-    setMessages([clearedKeyMsg]);
-    console.log(`${APP_NAME} Added API key cleared feedback message:`, clearedKeyMsg);
-  };
 
-  const handleUpdateCustomNames = () => {
-    const newAiName = sidebarAiNameInput.trim() || 'AI'; // Default to 'AI' if empty
-    const newUserName = sidebarUserNameInput.trim() || 'User'; // Default to 'User' if empty
-
-    console.log(`${APP_NAME} handleUpdateCustomNames called. Setting AI: "${newAiName}", User: "${newUserName}"`);
-
-    setAiName(newAiName); 
-    setUserName(newUserName); 
-
-    // Update sidebar input fields to reflect trimmed or defaulted values
-    setSidebarAiNameInput(newAiName);
-    setSidebarUserNameInput(newUserName);
-
-    const feedbackMsg = {
-      id: `ai-names-updated-${Date.now()}`,
-      text: `Display names updated! AI is now "${newAiName}", and you are "${newUserName}". These names will be used in chat displays and exports.`,
-      sender: Sender.AI, 
-      timestamp: new Date(),
+    const handleMouseUp = () => {
+      setIsResizingSidebar(false);
     };
-    setMessages(prev => [...prev, feedbackMsg]);
-    console.log(`${APP_NAME} Custom names updated. Feedback message added to chat.`);
-  };
+
+    if (isResizingSidebar) {
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'col-resize';
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    } else {
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    }
+
+    return () => {
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingSidebar]);
 
 
   return (
     <div className="flex flex-col h-screen">
-      <div style={{ backgroundColor: '#1C2333', height: '20px' }} className="w-full shrink-0"></div>
+      <div style={{ backgroundColor: '#1C2333', height: '0px' }} className="w-full shrink-0"></div>
       
       <div className="flex flex-grow overflow-hidden bg-slate-900 text-slate-100">
         <div className="w-[0px] bg-[#1C2333] p-0 shadow-lg shrink-0"></div>
 
         <div className="flex-grow flex flex-col overflow-hidden relative">
           <button
-            onClick={() => {
-              console.log(`${APP_NAME} Toggling right sidebar. Current visibility: ${isRightSidebarVisible}`);
-              setIsRightSidebarVisible(!isRightSidebarVisible);
-            }}
+            onClick={() => setIsRightSidebarVisible(!isRightSidebarVisible)}
             className="absolute top-3 right-3 z-20 p-2 bg-slate-700 hover:bg-slate-600 rounded-full text-slate-300 hover:text-slate-100 transition-colors"
             aria-label={isRightSidebarVisible ? "Hide chat details" : "Show chat details"}
             title={isRightSidebarVisible ? "Hide chat details" : "Show chat details"}
@@ -304,181 +279,121 @@ const App: React.FC = () => {
             )}
           </button>
 
-          {error && (
+          {chatProcessor.error && (
             <div className="p-3 bg-red-700 text-red-100 border-b border-red-600 text-sm" role="alert">
-              <strong>Error:</strong> {error}
+              <strong>Error:</strong> {chatProcessor.error}
             </div>
           )}
 
           <main className="flex-grow p-6 overflow-y-auto space-y-6 bg-slate-900">
-            {messages.map(msg => (
-              <ChatMessageItem 
-                key={msg.id} 
-                message={msg} 
-                aiName={aiName}
-                userName={userName}
-              />
+            {messageManager.messages.map(msg => (
+              <ChatMessageItem key={msg.id} message={msg} aiName={chatSettingsManager.aiName} userName={chatSettingsManager.userName} />
             ))}
             <div ref={messagesEndRef} />
           </main>
 
-          <div className="bg-slate-800 px-2 pt-2 pb-1 border-t border-slate-700">
+          <div className="bg-slate-800 px-0 pt-2 pb-0 border-t border-slate-700">
             <ChatInput
-              onSendMessage={handleSendMessage}
-              isLoading={isLoading}
-              messages={messages}
-              aiName={aiName}
-              userName={userName} 
+              onSendMessage={(text) => chatProcessor.processUserMessage(text, apiKeyManager.isApiKeySet)}
+              isLoading={chatProcessor.isLoading}
+              onExportChat={chatFilesHandler.exportChatToFile} 
+              exportDisabled={messageManager.messages.length === 0 && (!chatSettingsManager.systemInstruction || chatSettingsManager.systemInstruction === chatSettingsManager.DEFAULT_SYSTEM_INSTRUCTION)}
               placeholder={
-                isApiKeySet
-                  ? "Type your message to Gemini..."
-                  : "Set API Key in the sidebar to chat ->" 
+                apiKeyManager.isApiKeySet
+                  ? "Type your message here..."
+                  : "First, please set API Key in the sidebar to chat ->" 
               }
             />
           </div>
         </div>
+        
+        <input
+            type="file"
+            ref={fileInputRef}
+            onChange={onFileSelected}
+            accept=".txt"
+            className="hidden"
+            aria-hidden="true"
+        />
+        
+        {isRightSidebarVisible && (
+          <div
+            onMouseDown={handleMouseDownOnResize}
+            className={`shrink-0 cursor-col-resize group transition-colors duration-150 ease-in-out ${isResizingSidebar ? 'bg-blue-500' : 'bg-slate-700 hover:bg-slate-600'}`}
+            style={{ width: '2px' }} // This is the resizer handle thickness from user's provided file
+            title="Resize sidebar"
+            role="separator"
+            aria-orientation="vertical"
+            aria-controls="right-sidebar-container"
+          >
+            <div className="flex flex-col items-center justify-center h-full">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className={`h-1 w-1 rounded-full my-0.5 ${isResizingSidebar ? 'bg-white' : 'bg-slate-500 group-hover:bg-slate-400'}`} />
+              ))}
+            </div>
+          </div>
+        )}
 
-        <div 
-          className={`bg-slate-800 flex flex-col shadow-lg border-l border-slate-700 transition-all duration-300 ease-in-out overflow-y-auto shrink-0 ${
-            isRightSidebarVisible ? 'w-72 pt-6 pb-6 px-[5px]' : 'w-0 p-0'
-          }`}
-          style={{ scrollbarWidth: 'thin', scrollbarColor: '#334155 #1e293b' }} // For Firefox scrollbar
+        <div
+          id="right-sidebar-container" 
+          className="bg-slate-800 flex flex-col shadow-lg border-l border-slate-700 shrink-0"
+          style={{
+            width: isRightSidebarVisible ? `${sidebarWidth}px` : '0px',
+            paddingTop: isRightSidebarVisible && sidebarWidth > 20 ? '1.5rem' : '0px',
+            paddingBottom: isRightSidebarVisible && sidebarWidth > 20 ? '1.5rem' : '0px',
+            paddingLeft: isRightSidebarVisible && sidebarWidth > 20 ? '5px' : '0px',
+            paddingRight: isRightSidebarVisible && sidebarWidth > 20 ? '5px' : '0px',
+            transition: isResizingSidebar ? 'none' : 'width 0.3s ease-in-out, padding 0.3s ease-in-out',
+            overflowY: (isRightSidebarVisible && sidebarWidth > 0) ? 'auto' : 'hidden',
+            scrollbarWidth: 'thin', 
+            scrollbarColor: '#334155 #1e293b'
+          }}
         >
-          {isRightSidebarVisible && (
-            <>
-              <h2 className="text-xl font-semibold text-blue-400 mb-4 whitespace-nowrap">Chat Details</h2>
-              <div className="space-y-3 text-sm text-slate-300 mb-6 whitespace-nowrap">
-                <p>Messages: <span className="font-medium text-slate-100">{messages.length}</span></p>
-                <p>API Key Status: {isApiKeySet ? 
-                  <span className="text-green-400 font-medium">Set</span> : 
-                  <span className="text-yellow-400 font-medium">Not Set</span>}
-                </p>
-                 {isApiKeySet && _apiKey && (
-                  <div className="mt-2 text-xs">
-                    <p className="text-slate-400">Current Key: <span className="text-slate-500 font-mono">{_apiKey.substring(0,4)}...{_apiKey.substring(_apiKey.length - 4)}</span></p>
-                  </div>
-                )}
-              </div>
-              
-              {/* API Key Management Section - Always visible if sidebar is open */}
-              <div className="mb-4">
-                <label htmlFor="apiKeyInputSidebar" className="block text-xs font-medium text-slate-400 mb-1">Update API Key:</label>
-                <input
-                  id="apiKeyInputSidebar"
-                  type="password" 
-                  placeholder="Enter API key"
-                  // Use defaultValue if you want to show current key (masked), or just leave it blank for new entries.
-                  // For security, better to not pre-fill password fields.
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                       e.preventDefault(); // Prevent any default form submission
-                       const target = e.target as HTMLInputElement;
-                      if (target.value.trim()) {
-                        console.log(`${APP_NAME} API Key update submitted from sidebar input via Enter key.`);
-                        handleApiKeyUpdate(target.value.trim());
-                        target.value = ''; 
-                      }
-                    }
-                  }}
-                  className="w-full p-2 bg-slate-700 border border-slate-600 rounded-md text-sm placeholder-slate-500 focus:ring-blue-500 focus:border-blue-500"
-                />
-                <button
-                  onClick={() => {
-                      const input = document.getElementById('apiKeyInputSidebar') as HTMLInputElement;
-                      if (input && input.value.trim()) {
-                        console.log(`${APP_NAME} API Key update submitted from sidebar button.`);
-                        handleApiKeyUpdate(input.value.trim());
-                        input.value = ''; 
-                      } else {
-                        console.log(`${APP_NAME} API Key update button clicked, but input was empty.`);
-                         const inputEmptyMsg = {
-                            id: `ai-key-update-input-empty-${Date.now()}`,
-                            text: "Please enter an API Key in the field above before clicking 'Update Key'.",
-                            sender: Sender.AI,
-                            timestamp: new Date(),
-                          };
-                        setMessages(prev => [...prev, inputEmptyMsg]);
-                      }
-                  }}
-                  className="mt-2 w-full px-3 py-1.5 bg-sky-600 text-white rounded-md hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-opacity-50 text-xs"
-                >
-                  Update Key
-                </button>
-                {isApiKeySet && (
-                    <button
-                        onClick={handleClearApiKey}
-                        className="mt-2 w-full px-3 py-1.5 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50 text-xs"
-                    >
-                        Clear Saved API Key
-                    </button>
-                )}
-              </div>
-
-              {/* Customize Export Names Section - Always visible if sidebar is open */}
-              <div className="mt-4 pt-4 border-t border-slate-700">
-                <h3 className="text-sm font-semibold text-slate-300 mb-2 whitespace-nowrap">Customize Export Names</h3>
-                <div className="mb-2">
-                  <label htmlFor="aiNameInputSidebar" className="block text-xs font-medium text-slate-400 mb-1">AI Name:</label>
-                  <input
-                    id="aiNameInputSidebar"
-                    type="text"
-                    placeholder="e.g., Assistant"
-                    value={sidebarAiNameInput}
-                    onChange={(e) => setSidebarAiNameInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        console.log(`${APP_NAME} AI Name update submitted via Enter key.`);
-                        handleUpdateCustomNames();
-                      }
-                    }}
-                    className="w-full p-1.5 bg-slate-700 border border-slate-600 rounded-md text-sm placeholder-slate-500 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                <div className="mb-3">
-                  <label htmlFor="userNameInputSidebar" className="block text-xs font-medium text-slate-400 mb-1">Your Name:</label>
-                  <input
-                    id="userNameInputSidebar"
-                    type="text"
-                    placeholder="e.g., Explorer"
-                    value={sidebarUserNameInput}
-                    onChange={(e) => setSidebarUserNameInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        console.log(`${APP_NAME} User Name update submitted via Enter key.`);
-                        handleUpdateCustomNames();
-                      }
-                    }}
-                    className="w-full p-1.5 bg-slate-700 border border-slate-600 rounded-md text-sm placeholder-slate-500 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                <button
-                  onClick={handleUpdateCustomNames}
-                  className="w-full px-3 py-1.5 bg-sky-600 text-white rounded-md hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-opacity-50 text-xs"
-                >
-                  Save Names
-                </button>
-              </div>
-
-
-              <button
-                onClick={handleClearChat}
-                aria-label="Clear current chat messages"
-                className="mt-auto mx-auto max-w-[80%] px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors duration-150 ease-in-out flex items-center justify-center text-sm font-medium whitespace-nowrap"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="50px" strokeWidth="1.5" stroke="currentColor" className="w-5 h-5 mr-2">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9.75L14.25 12m0 0L12 14.25m2.25-2.25L14.25 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Clear Chat
-              </button>
-              <div className="mt-4 text-xs text-slate-500 text-center whitespace-nowrap">
-                Chat history is local to this session.
-              </div>
-            </>
+          {isRightSidebarVisible && 
+            (sidebarWidth > Math.max(50, MIN_SIDEBAR_WIDTH / 3)) && ( 
+            <RightSidebar
+              isApiKeySet={apiKeyManager.isApiKeySet}
+              apiKeyForDisplay={apiKeyManager.apiKeyForDisplay}
+              messagesCount={messageManager.messages.length}
+              currentAiName={chatSettingsManager.aiName}
+              currentUserName={chatSettingsManager.userName}
+              currentSystemInstruction={chatSettingsManager.systemInstruction}
+              defaultSystemInstruction={chatSettingsManager.DEFAULT_SYSTEM_INSTRUCTION}
+              onApiKeyUpdate={handleApiKeyUpdate}
+              onClearApiKey={handleClearApiKey}
+              onUpdateCustomNames={handleUpdateCustomNames}
+              onUpdateSystemInstruction={handleUpdateSystemInstruction}
+              onResetSystemInstruction={handleResetSystemInstruction}
+              onLoadHistoryClick={handleLoadHistoryClick}
+              onClearChat={handleClearChatRequest}
+              addAppMessage={(text, sender) => addAppFeedbackMessage(text, sender as Sender)} 
+            />
           )}
         </div>
       </div>
+      
+      {modalControls.showClearConfirmModal && (
+        <ConfirmationModal
+          isOpen={modalControls.showClearConfirmModal}
+          onClose={onCancelClear}
+          onConfirm={onConfirmClear}
+          title="Confirm Clear Chat"
+          message="Are you sure you want to clear the entire chat history? This cannot be undone."
+          confirmText="Yes, Clear It"
+          cancelText="No, Keep It"
+        />
+      )}
+      {modalControls.showExportConfirmModal && (
+        <ConfirmationModal
+          isOpen={modalControls.showExportConfirmModal}
+          onClose={onSkipExportAndClear} 
+          onConfirm={onConfirmExportAndClear} 
+          title="Export Chat History?"
+          message="Do you want to export your chat history as a text file before clearing it?"
+          confirmText="Yes, Export & Clear"
+          cancelText="No, Just Clear"
+        />
+      )}
     </div>
   );
 };

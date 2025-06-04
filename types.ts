@@ -1,7 +1,7 @@
 
 export enum Sender {
   User = 'user',
-  AI = 'ai',
+  AI = 'ai', // Represents 'model' role in Gemini
 }
 
 export interface Message {
@@ -9,4 +9,14 @@ export interface Message {
   text: string;
   sender: Sender;
   timestamp: Date;
+}
+
+// For storing/passing to Gemini SDK Chat history
+export interface ChatHistoryPart {
+    text: string;
+    // inlineData?: { mimeType: string; data: string; }; // Reserved for future use (e.g. images)
+}
+export interface ChatHistoryEntry {
+    role: 'user' | 'model';
+    parts: ChatHistoryPart[];
 }

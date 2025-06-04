@@ -1,6 +1,12 @@
 
 import React, { useState } from 'react';
 import { Message, Sender } from '../types';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeSanitize from 'rehype-sanitize';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import vscDarkPlus from 'react-syntax-highlighter/dist/esm/styles/prism/vsc-dark-plus'; // Corrected import
+
 
 const COMPONENT_NAME = "[ChatMessageItem.tsx]";
 
@@ -16,10 +22,9 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, aiName, user
 
   const alignment = isUser ? 'justify-end' : 'justify-start';
   
-  // py-2 was part of the previous adjustment for compactness
-  const bubbleBaseStyles = `max-w-xl lg:max-w-2xl px-4 py-2 rounded-xl shadow-md relative group`;
-  const userBubbleStyles = `bg-slate-700 text-slate-100 ${bubbleBaseStyles}`;
-  const aiBubbleStyles = `bg-blue-600 text-slate-50 font-mono ${bubbleBaseStyles}`; 
+  const bubbleBaseStyles = `max-w-xl lg:max-w-2xl px-4 py-3 rounded-xl shadow-md relative group`; // Increased py for better spacing with markdown
+  const userBubbleStyles = `bg-slate-700 text-slate-100 ${bubbleBaseStyles} user-message`;
+  const aiBubbleStyles = `bg-blue-600 text-slate-50 ${bubbleBaseStyles} ai-message`; // Removed font-mono, let markdown define for code
   
   const bubbleStyles = isUser ? userBubbleStyles : aiBubbleStyles;
 
@@ -28,17 +33,14 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, aiName, user
 
   const handleCopy = async () => {
     console.log(`${COMPONENT_NAME} handleCopy called for message ID: ${message.id}`);
-    if (message.sender === Sender.AI) {
-      try {
-        await navigator.clipboard.writeText(message.text); 
-        setIsCopied(true);
-        console.log(`${COMPONENT_NAME} Text copied to clipboard successfully.`);
-        setTimeout(() => setIsCopied(false), 2000);
-      } catch (err) {
-        console.error(`${COMPONENT_NAME} Failed to copy text for message ID ${message.id}:`, err);
-      }
-    } else {
-      console.log(`${COMPONENT_NAME} Copy action ignored for user message.`);
+    // Copy raw message.text which contains the Markdown
+    try {
+      await navigator.clipboard.writeText(message.text); 
+      setIsCopied(true);
+      console.log(`${COMPONENT_NAME} Text copied to clipboard successfully.`);
+      setTimeout(() => setIsCopied(false), 2000);
+    } catch (err) {
+      console.error(`${COMPONENT_NAME} Failed to copy text for message ID ${message.id}:`, err);
     }
   };
 
@@ -46,21 +48,57 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, aiName, user
     console.log(`${COMPONENT_NAME} Options clicked for message ID: ${message.id} (feature placeholder)`);
   };
 
+  const markdownComponents = {
+    // Customize heading styles if needed, or rely on global CSS
+    // h1: ({node, ...props}) => <h1 className="text-2xl font-bold my-2 text-current" {...props} />,
+    // p: ({node, ...props}) => <p className="mb-2 last:mb-0 text-current" {...props} />,
+    a: ({node, ...props}) => <a className="text-sky-400 hover:text-sky-300 underline" target="_blank" rel="noopener noreferrer" {...props} />,
+    code({node, inline, className, children, ...props}: any) {
+      const match = /language-(\w+)/.exec(className || '');
+      return !inline && match ? (
+        <SyntaxHighlighter
+          style={vscDarkPlus}
+          language={match[1]}
+          PreTag="div"
+          // {...props} // Avoid passing down invalid HTML attributes from react-markdown's props to SyntaxHighlighter's div
+          // customStyle={{ margin: 0, padding: '1em', borderRadius: '0.25rem' }} // Apply padding here if pre's global style is not enough
+          codeTagProps={{ style: { fontFamily: "monospace" } }} // Ensure code inside uses monospace
+        >
+          {String(children).replace(/\n$/, '')}
+        </SyntaxHighlighter>
+      ) : (
+        <code className={`text-current ${className}`} {...props}>
+          {children}
+        </code>
+      );
+    },
+    // pre: ({node, ...props}) => <pre className="bg-slate-800 p-2 rounded-md overflow-x-auto my-2" {...props} />,
+  };
+
   return (
     <div className={`flex ${alignment} w-full`}>
       <div className={`${bubbleStyles}`}>
-        <p className="text-sm whitespace-pre-wrap break-words">
-          <span className="font-semibold">{`[${displayName}: ${formattedTime}]`}</span>
-          {` - ${message.text}`}
-        </p>
+        <div className="text-xs text-opacity-80 mb-1"> {/* For timestamp and sender name */}
+          <span className="font-semibold">{displayName}</span>
+          <span className="ml-2">{formattedTime}</span>
+        </div>
+        <div className="markdown-content text-sm break-words">
+           <ReactMarkdown
+             components={markdownComponents}
+             remarkPlugins={[remarkGfm]}
+             rehypePlugins={[rehypeSanitize]} // Ensure this is after any plugins that might generate HTML (like rehype-raw, if used)
+           >
+             {message.text}
+           </ReactMarkdown>
+        </div>
         {/* Footer for AI messages with Copy/Options buttons */}
-        {!isUser && (
-          <div className={`flex items-center justify-end mt-1 pt-1 border-t border-opacity-25 border-blue-400`}>
-            <div className="flex items-center"> {/* Removed ml-2 from here */}
+        {message.sender === Sender.AI && ( // Ensure this only shows for AI messages
+          <div className={`flex items-center justify-end mt-2 pt-1 border-t ${isUser ? 'border-slate-600' : 'border-blue-500'} border-opacity-50`}>
+            <div className="flex items-center">
               <button
                 onClick={handleCopy}
-                title={isCopied ? "Copied!" : "Copy text"}
-                aria-label={isCopied ? "Text copied to clipboard" : "Copy AI message to clipboard"}
+                title={isCopied ? "Copied Markdown!" : "Copy Markdown"}
+                aria-label={isCopied ? "Markdown source copied to clipboard" : "Copy AI message Markdown source to clipboard"}
                 className={`p-1 rounded-full ${
                   isCopied 
                     ? 'text-green-400' 

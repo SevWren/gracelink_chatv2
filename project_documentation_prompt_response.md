@@ -99,10 +99,9 @@ The project is built with Vite for a fast development experience and optimized p
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/your-username/gracelink_chat.git
-    cd gracelink_chat
+    git clone https://github.com/sevwren/gracelink_chatv2.git
+    cd gracelink_chatv2
     ```
-    (Replace `your-username/gracelink_chat` with your actual repository URL)
 
 2.  **Install dependencies:**
     ```bash
@@ -186,10 +185,9 @@ This project is configured for easy deployment to GitHub Pages.
     // vite.config.ts
     export default defineConfig({
       // ... other config
-      base: '/YOUR_REPOSITORY_NAME/', // e.g., '/gracelink_chat/'
+      base: '/gracelink_chatv2/', 
     });
     ```
-    Replace `YOUR_REPOSITORY_NAME` with the actual name of your GitHub repository.
 
 2.  **Deploy:**
     Run the deploy script:
@@ -233,4 +231,3 @@ This project is currently unlicensed. (Consider adding an MIT License if desired
 ---
 
 Happy Chatting! 🎉
-```
