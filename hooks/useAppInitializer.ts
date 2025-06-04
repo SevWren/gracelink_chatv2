@@ -1,4 +1,3 @@
-
 import { useEffect } from 'react';
 import { Sender } from '../types';
 import { initializeGeminiClient, deinitializeGeminiClient } from '../services/geminiService';
@@ -19,7 +18,7 @@ export function useAppInitializer(
     console.log(`${HOOK_NAME} Initial app load effect running.`);
     
     const storedApiKey = apiKeyManager.loadStoredApiKey();
-    const { loadedSystemInstruction } = chatSettingsManager.loadStoredSettings();
+    chatSettingsManager.loadStoredSettings();
     // Use loadedSystemInstruction or chatSettingsManager.systemInstruction which should be updated by loadStoredSettings
     const currentSystemInstruction = chatSettingsManager.systemInstruction;
 

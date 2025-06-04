@@ -1,8 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
 import { Sender } from '../types'; // Assuming Sender is needed for addAppMessage
-
-const COMPONENT_NAME = "[RightSidebar.tsx]";
 
 interface RightSidebarProps {
   isApiKeySet: boolean;

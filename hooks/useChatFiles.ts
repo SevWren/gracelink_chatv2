@@ -1,6 +1,5 @@
-
 import { useCallback } from 'react';
-import { Message, Sender, ChatHistoryEntry } from '../types';
+import { Sender, ChatHistoryEntry } from '../types';
 import { MessageManager } from './useMessageManager';
 import { ChatSettingsManager } from './useChatSettings'; // Assuming this will be the type from useChatSettings
 import { resetChatSession } from '../services/geminiService';

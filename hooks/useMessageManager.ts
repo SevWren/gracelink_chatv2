@@ -1,7 +1,6 @@
-
 import { useState, useCallback } from 'react';
 import { Message, Sender, ChatHistoryEntry } from '../types';
-import { getCurrentChatHistory as getGeminiChatHistory, resetChatSession } from '../services/geminiService';
+import { getCurrentChatHistory as getGeminiChatHistory } from '../services/geminiService';
 
 const HOOK_NAME = "[useMessageManager]";
 const CHAT_HISTORY_LOCAL_STORAGE_KEY = 'geminiChatHistory';

@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Message, Sender } from '../types';
 import ReactMarkdown from 'react-markdown';
@@ -49,25 +48,27 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, aiName, user
   };
 
   const markdownComponents = {
-    // Customize heading styles if needed, or rely on global CSS
-    // h1: ({node, ...props}) => <h1 className="text-2xl font-bold my-2 text-current" {...props} />,
-    // p: ({node, ...props}) => <p className="mb-2 last:mb-0 text-current" {...props} />,
-    a: ({node, ...props}) => <a className="text-sky-400 hover:text-sky-300 underline" target="_blank" rel="noopener noreferrer" {...props} />,
-    code({node, inline, className, children, ...props}: any) {
+    a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+      <a
+        className="text-sky-400 hover:text-sky-300 underline"
+        target="_blank"
+        rel="noopener noreferrer"
+        {...props}
+      />
+    ),
+    code({ inline, className, children, ...props }: { inline?: boolean; className?: string; children?: React.ReactNode }) {
       const match = /language-(\w+)/.exec(className || '');
       return !inline && match ? (
         <SyntaxHighlighter
           style={vscDarkPlus}
           language={match[1]}
           PreTag="div"
-          // {...props} // Avoid passing down invalid HTML attributes from react-markdown's props to SyntaxHighlighter's div
-          // customStyle={{ margin: 0, padding: '1em', borderRadius: '0.25rem' }} // Apply padding here if pre's global style is not enough
-          codeTagProps={{ style: { fontFamily: "monospace" } }} // Ensure code inside uses monospace
+          codeTagProps={{ style: { fontFamily: "monospace" } }}
         >
           {String(children).replace(/\n$/, '')}
         </SyntaxHighlighter>
       ) : (
-        <code className={`text-current ${className}`} {...props}>
+        <code className={`text-current ${className ?? ''}`} {...props}>
           {children}
         </code>
       );
